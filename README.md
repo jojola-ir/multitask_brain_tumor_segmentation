@@ -1,1 +1,1 @@
-# multitask_brain_tumor_segmentation
+# multitask_segmentation
