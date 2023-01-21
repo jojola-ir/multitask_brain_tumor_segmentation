@@ -1,87 +1,81 @@
-import itertools
+import argparse
+import os
+from os.path import join
 
-import torch
-import torchdata.datapipes as dp
-from torch.utils.data import default_collate
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-from torchvision.io import read_image, ImageReadMode
 
-IMG_SIZE = 512
-
-
-def get_noisy_image(image, noise_parameter=0.2):
-    """Adds noise to an image.
-
-    Args:
-        image: image, np.array with values from 0 to 1
-    """
-    image_shape = image.shape
-
-    # noise_type = np.random.choice(['gaussian', 'poisson', 'bernoulli'])
-    # if noise_type == 'gaussian':
-    #     noise = torch.normal(0, noise_parameter, image_shape)
-    #     noisy_image = (image + noise).clip(0, 1)
-    # elif noise_type == 'poisson':
-    #     a = noise_parameter * torch.ones(image_shape)
-    #     noise = torch.poisson(a)
-    #     noise /= noise.max()
-    #     noisy_image = (image + noise).clip(0, 1)
-    # elif noise_type == 'bernoulli':
-    #     noise = torch.bernoulli(noise_parameter * torch.ones(image_shape))
-    #     noisy_image = (image * noise).clip(0, 1)
-
-    noise = torch.normal(0, noise_parameter, image_shape)
-    noisy_image = (image + noise).clip(0, 1)
-
-    return noisy_image
+IMG_SIZE = 224
 
 
 def transformations():
     """Applies transformations to an image.
-
     Args:
         image: image, np.array
     """
     transform = transforms.Compose([
         transforms.ToTensor(),
-        # transforms.ConvertImageDtype(torch.float),
         transforms.Resize((IMG_SIZE, IMG_SIZE)),
-        transforms.Normalize(mean=(0, ),
-                             std=(1, )),
+        # transforms.Normalize(mean=[0.485, 0.456, 0.406],
+        #                      std=[0.229, 0.224, 0.225]),
     ])
     return transform
 
 
-def build_data_pipes(path_to_images, transform, noise_parameter, batch_size):
-    """Builds a data pipe.
+class MultitaskDataset(Dataset):
+    """Custom multitask dataset for classification and segmentation tasks."""
 
-    Args:
-        path_to_images: path to the folder with images
-        transform: transforms to apply to images
-        noise_parameter: std of the noise
-        batch_size: batch size
-    """
-    data_pipe = dp.iter.FileLister(path_to_images, recursive=True)\
-        .filter(lambda x: x.endswith(('.jpg', '.png', '.jpeg', '.JPG', '.PNG', '.JPEG')))\
-        .map(lambda x: (x, x))\
-        .enumerate()\
-        .to_map_datapipe()\
-        .map(lambda x: (read_image(x[0], ImageReadMode.RGB), read_image(x[1], ImageReadMode.RGB)))\
-        .map(lambda x: (get_noisy_image(x[0], noise_parameter), x[1]))\
-        .map(lambda x: (transform(x[0]), transform(x[1])))\
-        .shuffle()\
-        .batch(batch_size)\
-        .map(lambda x: default_collate(x))
-    return data_pipe
+    def __init__(self, data, transform=None):
+        super(MultitaskDataset, self).__init__()
+        self.transform = transform
+
+        dirs = os.listdir(data)
+        extensions = (".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG")
+        self.data = []
+
+        for dir in dirs:
+            if not dir.startswith("."):
+                subdir = join(data, dir)
+                for file in os.listdir(join(subdir, dir)):
+                    if file.endswith(extensions):
+                        label = dirs.index(dir)
+                        self.data.append({"image": join(join(subdir, dir), file),
+                                          "mask": join(join(subdir, dir) + " GT", file),
+                                          "label": label})
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        data = self.data[idx]
+
+        image = Image.open(data["image"]).convert("RGB")
+        mask = Image.open(data["mask"]).convert("L")
+        label = data["label"]
+
+        if self.transform:
+            image = self.transform(image)
+            mask = self.transform(mask)
+
+        return image, mask, label
 
 
 if __name__ == '__main__':
-    path_to_images = "../../../datasets/GAN/chest_xray/"
-    noise_parameter = 0.2
-    batch_size = 32
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--path_to_images", "-p", type=str,
+                        default="/Users/irina/Documents/Etudes/DS/datasets/Segmentation/large_scale_fish_dataset/Fish_Dataset/")
+    parser.add_argument("--batch_size", "-b", type=int, default=32)
+    args = parser.parse_args()
 
-    transform = transformations()
+    dataset_path = args.path_to_images
+    batch_size = args.batch_size
 
-    data_pipe = build_data_pipes(path_to_images, transform, noise_parameter, batch_size)
-    for noisy_image, target in itertools.islice(data_pipe, 5):
-        print(noisy_image.shape, target.shape)
+    dataset = MultitaskDataset(data=dataset_path, transform=transformations())
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    for i, (image, mask, label) in enumerate(loader):
+        print(image.shape, mask.shape, label)
+        print(f"Image | mean: {image.mean():.3f}\t std: {image.std():.3f}\t shape: {image.shape}")
+        print(f"Mask | mean: {mask.mean():.3f}\t std: {mask.std():.3f}\t shape: {mask.shape}")
+        break
