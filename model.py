@@ -75,7 +75,12 @@ class HydraUnet(nn.Module):
         x_cl = x
         for classifier in self.classifier:
             x_cl = classifier(x_cl)
-        outputs['classification'] = nn.Linear(x_cl.shape[1], self.num_classes)(x_cl)
+
+        x_cl = nn.Linear(x_cl.shape[1], self.num_classes)(x_cl)
+        if self.num_classes > 1:
+            outputs['classification'] = nn.Softmax(dim=1)(x_cl)
+        else:
+            outputs['classification'] = nn.Sigmoid()(x_cl)
 
         for idx in range(0, len(self.ups), 2):
             x = self.ups[idx](x)
