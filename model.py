@@ -4,16 +4,6 @@ import torch.nn as nn
 import torchvision.transforms.functional as F
 
 
-class Identity(nn.Module):
-    """Identity layer."""
-
-    def __init__(self):
-        super(Identity, self).__init__()
-
-    def forward(self, x):
-        return x
-
-
 class ConvBlock(nn.Module):
     """Convolutional block."""
 
