@@ -12,6 +12,7 @@ IMG_SIZE = 224
 def transformations():
     """Applies transformations to an image.
     Args:
+    -----
         image: image, np.array
     """
     transform = transforms.Compose([
