@@ -25,29 +25,32 @@ def transformations():
 
 class MultitaskDataset(Dataset):
     """Custom multitask dataset for classification and segmentation tasks."""
-
     def __init__(self, data, transform=None):
+        """Initializes the dataset."""
         super(MultitaskDataset, self).__init__()
         self.transform = transform
 
         dirs = os.listdir(data)
+        dirs = [dir for dir in dirs if not dir.startswith(".")]
+
+        self.classes = {i: dir for i, dir in enumerate(dirs)}
+
         extensions = (".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG")
         self.data = []
-
         for dir in dirs:
-            if not dir.startswith("."):
-                subdir = join(data, dir)
-                for file in os.listdir(join(subdir, dir)):
-                    if file.endswith(extensions):
-                        label = dirs.index(dir)
-                        self.data.append({"image": join(join(subdir, dir), file),
-                                          "mask": join(join(subdir, dir) + " GT", file),
-                                          "label": label})
+            subdir = join(data, dir)
+            for file in os.listdir(join(subdir, dir)):
+                if file.endswith(extensions):
+                    label = dirs.index(dir)
+                    self.data.append({"image": join(join(subdir, dir), file),
+                                      "mask": join(join(subdir, dir) + " GT", file),
+                                      "label": label})
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
+        """Returns an image and its corresponding mask and label."""
         data = self.data[idx]
 
         image = Image.open(data["image"]).convert("RGB")
@@ -59,6 +62,10 @@ class MultitaskDataset(Dataset):
             mask = self.transform(mask)
 
         return image, mask, label
+
+    def get_classes(self):
+        """Returns encoded outputs and corresponding classes of the dataset."""
+        return self.classes
 
 
 if __name__ == '__main__':
