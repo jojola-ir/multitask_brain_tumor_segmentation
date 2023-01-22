@@ -59,7 +59,7 @@ class MultitaskDataset(Dataset):
         --------
             image: image, torch.Tensor
             mask: mask, torch.Tensor
-            label: label, torch.Tensor
+            label: label, int
         """
         data = self.data[idx]
 
