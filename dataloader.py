@@ -50,7 +50,16 @@ class MultitaskDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, idx):
-        """Returns an image and its corresponding mask and label."""
+        """Returns an image and its corresponding mask and label.
+        Args:
+        -----
+            idx: index of the image
+        Returns:
+        --------
+            image: image, torch.Tensor
+            mask: mask, torch.Tensor
+            label: label, torch.Tensor
+        """
         data = self.data[idx]
 
         image = Image.open(data["image"]).convert("RGB")
@@ -64,7 +73,11 @@ class MultitaskDataset(Dataset):
         return image, mask, label
 
     def get_classes(self):
-        """Returns encoded outputs and corresponding classes of the dataset."""
+        """Returns encoded outputs and corresponding classes of the dataset.
+        Returns:
+        --------
+            classes: dict, {encoded_output: class}
+        """
         return self.classes
 
 
