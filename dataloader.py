@@ -26,6 +26,7 @@ def transformations():
 
 class MultitaskDataset(Dataset):
     """Custom multitask dataset for classification and segmentation tasks."""
+
     def __init__(self, data, transform=None):
         """Initializes the dataset."""
         super(MultitaskDataset, self).__init__()
