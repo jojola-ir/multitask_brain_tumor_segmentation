@@ -282,7 +282,7 @@ def main(path_to_data, batch_size, epochs, lr, save_path, device):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--path_to_data", type=str, default="data")
+    parser.add_argument("--path_to_data", type=str, default="data/")
     parser.add_argument("--batch_size", "-b", type=int, default=4)
     parser.add_argument("--epochs", "-e", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-3)
