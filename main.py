@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
 from dataloader import MultitaskDataset, transformations
-from loss import FocalLoss
+from loss import DiceBCELoss, FocalLoss
 from metrics import DiceScore
 from model import build_model
 
@@ -19,7 +19,7 @@ ALPHA = 0.4
 BETA = 0.6
 
 
-def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_path, device):
+def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_path, device, classification):
     """Trains the model.
     Args:
     -----
@@ -32,7 +32,7 @@ def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_
         device: device, torch.device
     """
     classification_criterion = nn.CrossEntropyLoss()
-    segmentation_criterion = FocalLoss()
+    segmentation_criterion = DiceBCELoss()
 
     scheduler = ExponentialLR(optimizer, gamma=0.1)
     lrs = []
@@ -55,40 +55,48 @@ def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_
         ap = 0
         dice_score = 0
         with tqdm(train_loader, unit="batch") as loader:
-            loader.set_description(f"Train | Epoch {epoch + 1}/{epochs}")
             k = 1
             for (images, masks, labels) in loader:
-                loader.set_description(f"Epoch {epoch} / {epochs}")
+                loader.set_description(f"Epoch {epoch + 1} / {epochs}")
                 images, masks, labels = images.to(device), masks.to(device), labels.to(device)
 
                 optimizer.zero_grad()
 
                 outputs = model(images)
 
-                outputs_cl = outputs["classification"]
+                if classification:
+                    outputs_cl = outputs["classification"]
+                    classification_loss = classification_criterion(outputs_cl, labels)
 
-                classification_loss = classification_criterion(outputs_cl, labels)
+                    # classification metrics
+                    acc += accuracy(outputs_cl, labels)
+                    ap += average_precision(outputs_cl, labels)
+                else:
+                    classification_loss = 0
                 segmentation_loss = segmentation_criterion(outputs["segmentation"], masks)
+                if not classification:
+                    ALPHA = 0
+                    BETA = 1
                 loss = ALPHA * classification_loss + BETA * segmentation_loss
                 loss.backward()
                 loss_list.append(loss.item())
 
                 optimizer.step()
 
-                # classification metrics
-                acc += accuracy(outputs_cl, labels)
-                ap += average_precision(outputs_cl, labels)
-
                 # segmentation metrics
                 dice_score += dice(outputs["segmentation"], masks)
 
-                loader.set_postfix(loss=loss.item(), acc=acc.item() / k, ap=ap.item() / k, dice=dice_score.item() / k)
+                if classification:
+                    loader.set_postfix(loss=loss.item(), acc=acc.item() / k, ap=ap.item() / k, dice=dice_score.item() / k)
+                else:
+                    loader.set_postfix(loss=loss.item(), dice=dice_score.item() / k)
 
                 k += 1
 
         lrs.append(optimizer.param_groups[0]["lr"])
-        acc_list.append(acc.item() / k)
-        ap_list.append(ap.item() / k)
+        if classification:
+            acc_list.append(acc.item() / k)
+            ap_list.append(ap.item() / k)
         dice_list.append(dice_score.item() / k)
 
         val_loss_list = []
@@ -110,28 +118,37 @@ def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_
 
                     outputs = model(images)
 
-                    outputs_cl = outputs["classification"]
+                    if classification:
+                        outputs_cl = outputs["classification"]
+                        classification_loss = classification_criterion(outputs_cl, labels)
 
-                    classification_loss = classification_criterion(outputs_cl, labels)
+                        # classification metrics
+                        acc += accuracy(outputs_cl, labels)
+                        ap += average_precision(outputs_cl, labels)
+                    else:
+                        classification_loss = 0
                     segmentation_loss = segmentation_criterion(outputs["segmentation"], masks)
+                    if not classification:
+                        ALPHA = 0
+                        BETA = 1
                     loss = ALPHA * classification_loss + BETA * segmentation_loss
                     val_loss_list.append(loss.item())
-
-                    # classification metrics
-                    acc += accuracy(outputs_cl, labels)
-                    ap += average_precision(outputs_cl, labels)
 
                     # segmentation metrics
                     dice_score += dice(outputs["segmentation"], masks)
 
-                    loader.set_postfix(loss=loss.item(), acc=acc.item() / k, ap=ap.item() / k,
-                                       dice=dice_score.item() / k)
+                    if classification:
+                        loader.set_postfix(loss=loss.item(), acc=acc.item() / k, ap=ap.item() / k,
+                                           dice=dice_score.item() / k)
+                    else:
+                        loader.set_postfix(loss=loss.item(), dice=dice_score.item() / k)
 
                     k += 1
 
-        val_acc_list.append(acc.item() / k)
-        val_ap_list.append(ap.item() / k)
-        val_dice_list.append(dice_score.item() / k)
+                if classification:
+                    val_acc_list.append(acc.item() / k)
+                    val_ap_list.append(ap.item() / k)
+                val_dice_list.append(dice_score.item() / k)
 
         if epoch % 5 == 0:
             if not os.path.exists(save_path):
@@ -148,8 +165,9 @@ def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_
 
     # Plot metrics
     fig, ax = plt.subplots()
-    ax.plot(acc_list, color='red', label='Train accuracy')
-    ax.plot(ap_list, linestyle='--', color='orange', label='Train average Precision')
+    if classification:
+        ax.plot(acc_list, color='red', label='Train accuracy')
+        ax.plot(ap_list, linestyle='--', color='orange', label='Train average Precision')
     ax.plot(dice_list, linestyle='--', color='blue', label='Train dice Score')
 
     legend = ax.legend(loc='upper right', shadow=True)
@@ -157,8 +175,9 @@ def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_
     plt.savefig(join(fig_save, f"train_metrics.png"))
 
     fig, ax = plt.subplots()
-    ax.plot(val_acc_list, color='red', label='Val accuracy')
-    ax.plot(val_ap_list, linestyle='--', color='orange', label='Val average Precision')
+    if classification:
+        ax.plot(val_acc_list, color='red', label='Val accuracy')
+        ax.plot(val_ap_list, linestyle='--', color='orange', label='Val average Precision')
     ax.plot(val_dice_list, linestyle='--', color='blue', label='Val dice Score')
 
     legend = ax.legend(loc='upper right', shadow=True)
@@ -183,7 +202,7 @@ def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_
     plt.savefig(join(fig_save, f"lr.png"))
 
 
-def test(model, test_loader, num_classes, device):
+def test(model, test_loader, num_classes, device, classification):
     """Tests the model.
     Args:
     -----
@@ -216,27 +235,35 @@ def test(model, test_loader, num_classes, device):
 
                 outputs = model(images)
 
-                outputs_cl = outputs["classification"]
+                if classification:
+                    outputs_cl = outputs["classification"]
+                    classification_loss = classification_criterion(outputs_cl, labels)
 
-                classification_loss = classification_criterion(outputs_cl, labels)
+                    # classification metrics
+                    acc = accuracy(outputs_cl, labels)
+                    ap = average_precision(outputs_cl, labels)
+                    acc_list.append(acc.item())
+                    ap_list.append(ap.item())
+                else:
+                    classification_loss = 0
                 segmentation_loss = segmentation_criterion(outputs["segmentation"], masks)
+                if not classification:
+                    ALPHA = 0
+                    BETA = 1
                 loss = ALPHA * classification_loss + BETA * segmentation_loss
                 loss_list.append(loss.item())
-
-                # classification metrics
-                acc = accuracy(outputs_cl, labels)
-                ap = average_precision(outputs_cl, labels)
-                acc_list.append(acc.item())
-                ap_list.append(ap.item())
 
                 # segmentation metrics
                 dice_score = dice(outputs["segmentation"], masks)
                 dice_list.append(dice_score.item())
 
-                loader.set_postfix(loss=loss.item(), acc=acc.item(), ap=ap.item(), dice=dice_score.item())
+                if classification:
+                    loader.set_postfix(loss=loss.item(), acc=acc.item(), ap=ap.item(), dice=dice_score.item())
+                else:
+                    loader.set_postfix(loss=loss.item(), dice=dice_score.item())
 
 
-def main(path_to_data, batch_size, epochs, lr, save_path, device):
+def main(path_to_data, batch_size, epochs, lr, save_path, device, classification):
     """Main function.
     Args:
     -----
@@ -281,7 +308,8 @@ def main(path_to_data, batch_size, epochs, lr, save_path, device):
 
     # Load model
     print("Creating model...")
-    model = build_model(in_channels=in_channels, out_channels=out_channels, num_classes=num_classes)
+    model = build_model(in_channels=in_channels, out_channels=out_channels, num_classes=num_classes,
+                        classification=classification)
     model.to(device)
     print(model)
 
@@ -290,11 +318,11 @@ def main(path_to_data, batch_size, epochs, lr, save_path, device):
 
     # Train model
     print("Training model...")
-    train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_path, device)
+    train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_path, device, classification)
 
     # Test model
     print("Testing model...")
-    test(model, test_loader, num_classes, device)
+    test(model, test_loader, num_classes, device, classification)
 
 
 if __name__ == "__main__":
@@ -305,6 +333,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", "-e", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--save_path", type=str, default="results/")
+    parser.add_argument("--classification", "-c", action="store_true")
 
     args = parser.parse_args()
 
@@ -313,14 +342,15 @@ if __name__ == "__main__":
     epochs = args.epochs
     lr = args.lr
     save_path = args.save_path
+    classification = args.classification
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
-        device = torch.device("cpu")
+        device = torch.device("mps")
     else:
         device = torch.device("cpu")
 
     print(f"Device: {device}")
 
-    main(path_to_data, batch_size, epochs, lr, save_path, device)
+    main(path_to_data, batch_size, epochs, lr, save_path, device, classification)

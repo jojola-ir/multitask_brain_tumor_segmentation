@@ -25,12 +25,13 @@ class ConvBlock(nn.Module):
 class HydraUnet(nn.Module):
     """Custom Unet model for segmentation and classification."""
 
-    def __init__(self, in_channels=3, out_channels=1, in_features=32, depth=3, num_classes=2):
+    def __init__(self, in_channels=3, out_channels=1, in_features=32, depth=3, num_classes=2, classification=True):
         super(HydraUnet, self).__init__()
         self.num_classes = num_classes
         self.downs = nn.ModuleList()
         self.ups = nn.ModuleList()
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.classification = classification
 
         # downstream
         for features in range(depth):
@@ -50,12 +51,13 @@ class HydraUnet(nn.Module):
         self.bottleneck = ConvBlock(in_channels, in_channels * 2)
 
         # classifier
-        self.classifier = nn.ModuleList()
+        if self.classification:
+            self.classifier = nn.ModuleList()
 
-        for features in reversed(range(depth)):
-            feature = in_channels * 2 ** features // 2
-            self.classifier.append(nn.Conv2d(feature, feature // 2, kernel_size=2, stride=2))
-        self.classifier.append(nn.Flatten())
+            for features in reversed(range(depth)):
+                feature = in_channels * 2 ** features // 2
+                self.classifier.append(nn.Conv2d(feature, feature // 2, kernel_size=2, stride=2))
+            self.classifier.append(nn.Flatten())
 
         self.conv_output = nn.Conv2d(in_features, out_channels, kernel_size=1)
 
@@ -72,15 +74,16 @@ class HydraUnet(nn.Module):
         x = self.bottleneck(x)
         skips = skips[::-1]
 
-        x_cl = x
-        for classifier in self.classifier:
-            x_cl = classifier(x_cl)
+        if self.classification:
+            x_cl = x
+            for classifier in self.classifier:
+                x_cl = classifier(x_cl)
 
-        x_cl = nn.Linear(x_cl.shape[1], self.num_classes)(x_cl)
-        if self.num_classes > 1:
-            outputs['classification'] = nn.Softmax(dim=1)(x_cl)
-        else:
-            outputs['classification'] = nn.Sigmoid()(x_cl)
+            x_cl = nn.Linear(x_cl.shape[1], self.num_classes)(x_cl)
+            if self.num_classes > 1:
+                outputs['classification'] = nn.Softmax(dim=1)(x_cl)
+            else:
+                outputs['classification'] = nn.Sigmoid()(x_cl)
 
         for idx in range(0, len(self.ups), 2):
             x = self.ups[idx](x)
@@ -98,7 +101,7 @@ class HydraUnet(nn.Module):
         return outputs
 
 
-def build_model(in_channels=3, out_channels=1, num_classes=2):
+def build_model(in_channels=3, out_channels=1, num_classes=2, classification=True):
     """Builds the model.
     Args:
     -----
@@ -107,7 +110,8 @@ def build_model(in_channels=3, out_channels=1, num_classes=2):
     --------
         model: model, nn.Module
     """
-    model = HydraUnet(in_channels=in_channels, out_channels=out_channels, num_classes=num_classes)
+    model = HydraUnet(in_channels=in_channels, out_channels=out_channels, num_classes=num_classes,
+                      classification=classification)
     return model
 
 
