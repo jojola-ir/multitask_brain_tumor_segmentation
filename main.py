@@ -15,8 +15,8 @@ from loss import FocalLoss
 from metrics import DiceScore
 from model import build_model
 
-ALPHA = 0.3
-BETA = 0.7
+ALPHA = 0.4
+BETA = 0.6
 
 
 def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_path, device):
@@ -51,8 +51,12 @@ def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_
 
     for epoch in range(epochs):
         model.train()
+        acc = 0
+        ap = 0
+        dice_score = 0
         with tqdm(train_loader, unit="batch") as loader:
             loader.set_description(f"Train | Epoch {epoch + 1}/{epochs}")
+            k = 1
             for (images, masks, labels) in loader:
                 loader.set_description(f"Epoch {epoch} / {epochs}")
                 images, masks, labels = images.to(device), masks.to(device), labels.to(device)
@@ -69,29 +73,38 @@ def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_
                 loss.backward()
                 loss_list.append(loss.item())
 
-                lrs.append(optimizer.param_groups[0]["lr"])
                 optimizer.step()
 
                 # classification metrics
-                acc = accuracy(outputs_cl, labels)
-                ap = average_precision(outputs_cl, labels)
-                acc_list.append(acc.item())
-                ap_list.append(ap.item())
+                acc += accuracy(outputs_cl, labels)
+                ap += average_precision(outputs_cl, labels)
 
                 # segmentation metrics
-                dice_score = dice(outputs["segmentation"], masks)
-                dice_list.append(dice_score.item())
+                dice_score += dice(outputs["segmentation"], masks)
 
-                loader.set_postfix(loss=loss.item(), acc=acc.item(), ap=ap.item(), dice=dice_score.item())
+                loader.set_postfix(loss=loss.item(), acc=acc.item() / k, ap=ap.item() / k, dice=dice_score.item() / k)
+
+                k += 1
+
+        lrs.append(optimizer.param_groups[0]["lr"])
+        acc_list.append(acc.item() / k)
+        ap_list.append(ap.item() / k)
+        dice_list.append(dice_score.item() / k)
 
         val_loss_list = []
         val_acc_list = []
         val_ap_list = []
         val_dice_list = []
+
+        acc = 0
+        ap = 0
+        dice_score = 0
+
         model.eval()
         with torch.no_grad():
             with tqdm(val_loader, unit="batch") as loader:
                 loader.set_description("Validation")
+                k = 1
                 for (images, masks, labels) in loader:
                     images, masks, labels = images.to(device), masks.to(device), labels.to(device)
 
@@ -105,16 +118,20 @@ def train(model, optimizer, train_loader, val_loader, epochs, num_classes, save_
                     val_loss_list.append(loss.item())
 
                     # classification metrics
-                    acc = accuracy(outputs_cl, labels)
-                    ap = average_precision(outputs_cl, labels)
-                    val_acc_list.append(acc.item())
-                    val_ap_list.append(ap.item())
+                    acc += accuracy(outputs_cl, labels)
+                    ap += average_precision(outputs_cl, labels)
 
                     # segmentation metrics
-                    dice_score = dice(outputs["segmentation"], masks)
-                    val_dice_list.append(dice_score.item())
+                    dice_score += dice(outputs["segmentation"], masks)
 
-                    loader.set_postfix(loss=loss.item(), acc=acc.item(), ap=ap.item(), dice=dice_score.item())
+                    loader.set_postfix(loss=loss.item(), acc=acc.item() / k, ap=ap.item() / k,
+                                       dice=dice_score.item() / k)
+
+                    k += 1
+
+        val_acc_list.append(acc.item() / k)
+        val_ap_list.append(ap.item() / k)
+        val_dice_list.append(dice_score.item() / k)
 
         if epoch % 5 == 0:
             if not os.path.exists(save_path):
@@ -300,7 +317,7 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
-        device = torch.device("mps")
+        device = torch.device("cpu")
     else:
         device = torch.device("cpu")
 
